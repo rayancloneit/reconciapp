@@ -1,0 +1,865 @@
+<!doctype html>
+<html lang="en">
+    <head>
+        <meta charset="UTF-8" />
+        <meta
+            name="viewport"
+            content="width=device-width, initial-scale=1.0"
+        />
+        <title>Reconciliation Engine</title>
+        <link
+            rel="stylesheet"
+            href="{{ url_for('static', filename='style.css') }}"
+        />
+    </head>
+    <body>
+        <div id="toastStack" class="toast-stack" aria-live="polite" aria-atomic="true"></div>
+
+        <div id="modalOverlay" class="modal-overlay">
+            <div class="modal-card">
+                <h2 id="modalTitle">Alert</h2>
+                <p id="modalBody">Message goes here...</p>
+                <div class="modal-footer">
+                    <button id="modalCancel" class="uber-btn-outline">
+                        Cancel
+                    </button>
+                    <button id="modalConfirm" class="uber-btn-black-action compact-action">
+                        Proceed
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <div id="importOverlay" class="modal-overlay">
+            <div class="modal-card import-card">
+                <div class="import-card-header">
+                    <div>
+                        <p class="eyebrow">Office Import Wizard</p>
+                        <h2 id="importTitle">Import Transactions</h2>
+                    </div>
+                    <button
+                        type="button"
+                        class="text-btn"
+                        onclick="closeImportWizard()"
+                    >
+                        Close
+                    </button>
+                </div>
+
+                <div class="wizard-steps">
+                    <span class="step-chip active">1. Upload</span>
+                    <span class="step-chip" id="stepMap">2. Map</span>
+                    <span class="step-chip" id="stepConfirm">3. Confirm</span>
+                </div>
+
+                <div class="import-grid">
+                    <div class="import-panel">
+                        <div class="panel-section">
+                            <label class="field-label">Choose File</label>
+                            <input
+                                id="importFileInput"
+                                class="input-shell"
+                                type="file"
+                                accept=".csv,.xlsx"
+                            />
+                            <button
+                                type="button"
+                                class="uber-btn-black-action compact-action"
+                                onclick="uploadImportFile()"
+                            >
+                                Upload And Preview
+                            </button>
+                        </div>
+
+                        <div class="panel-section" id="sheetSection" hidden>
+                            <label class="field-label">Worksheet</label>
+                            <select id="sheetSelect" class="input-shell"></select>
+                        </div>
+
+                        <div class="panel-section" id="presetSection" hidden>
+                            <label class="field-label">Saved Preset</label>
+                            <select id="presetSelect" class="input-shell">
+                                <option value="">Use detected mapping</option>
+                            </select>
+                        </div>
+
+                        <div class="panel-section" id="mappingSection" hidden>
+                            <div class="mapping-header">
+                                <label class="field-label">Column Mapping</label>
+                                <p class="muted-copy">
+                                    Map your office headers into the fields this
+                                    app understands.
+                                </p>
+                            </div>
+                            <div id="mappingFields" class="mapping-fields"></div>
+                        </div>
+
+                        <div class="panel-section preset-save" id="presetSaveSection" hidden>
+                            <label class="check-row">
+                                <input id="savePresetCheckbox" type="checkbox" />
+                                <span>Save this mapping as a preset</span>
+                            </label>
+                            <input
+                                id="presetNameInput"
+                                class="input-shell"
+                                type="text"
+                                placeholder="Preset name, e.g. GL monthly export"
+                            />
+                        </div>
+
+                        <div class="panel-section" id="confirmSection" hidden>
+                            <button
+                                type="button"
+                                class="uber-btn-black-action compact-action"
+                                onclick="confirmImport()"
+                            >
+                                Confirm Import
+                            </button>
+                            <div id="importSummary" class="summary-box" hidden></div>
+                        </div>
+                    </div>
+
+                    <div class="import-panel preview-panel">
+                        <div class="panel-section">
+                            <div class="preview-header">
+                                <div>
+                                    <p class="eyebrow">Preview</p>
+                                    <h3 id="previewFileName">Upload a file to begin</h3>
+                                </div>
+                                <span id="previewRowCount" class="badge">0 rows</span>
+                            </div>
+                            <p id="importError" class="error-text" hidden></p>
+                            <div id="previewTableWrap" class="preview-table-wrap" hidden>
+                                <table class="preview-table" id="previewTable"></table>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="app-container">
+            <header class="main-header">
+                <h1>Transactions</h1>
+            </header>
+
+            <div class="uber-card division-card">
+                <div>
+                    <p class="eyebrow">Division</p>
+                    <h3>{{ active_division }}</h3>
+                </div>
+                <div class="division-switcher">
+                    {% for division in divisions %}
+                    <form action="/switch_division/{{ division }}" method="post">
+                        <button
+                            type="submit"
+                            class="division-chip {% if division == active_division %}division-chip-active{% endif %}"
+                        >
+                            {{ division }}
+                        </button>
+                    </form>
+                    {% endfor %}
+                </div>
+            </div>
+
+            <form action="/add_to_queue" method="post" id="mainForm">
+                <div class="tables-grid">
+                    <div class="uber-card" id="dropZoneA">
+                        <div class="card-header card-header-top">
+                            <div>
+                                <p class="eyebrow">GL</p>
+                                <h3>General Ledger</h3>
+                            </div>
+                            <div class="header-actions">
+                                <button
+                                    type="button"
+                                    class="sort-btn"
+                                    onclick="sortTable('tableA', 'text')"
+                                >
+                                    A-Z
+                                </button>
+                                <button
+                                    type="button"
+                                    class="sort-btn"
+                                    onclick="sortTable('tableA', 'amount')"
+                                >
+                                    $
+                                </button>
+                                <button
+                                    type="button"
+                                    class="uber-btn-outline compact-outline"
+                                    onclick="openImportWizard('A')"
+                                >
+                                    Import
+                                </button>
+                                <a
+                                    href="/export_transactions/A"
+                                    class="uber-btn-outline compact-outline"
+                                >
+                                    Export
+                                </a>
+                                <span id="totalA" class="badge">0.00</span>
+                            </div>
+                        </div>
+                        <input
+                            type="text"
+                            id="searchA"
+                            class="uber-search"
+                            onkeyup="filterTable('searchA', 'tableA', 'totalA')"
+                            placeholder="Search GL description, ref, note..."
+                            autocomplete="off"
+                            aria-label="Search general ledger transactions"
+                        />
+                        <div class="table-toolbar">
+                            <p class="table-helper">
+                                Click a row to compare matches. Use the checkbox
+                                to send it to the queue.
+                            </p>
+                            <button
+                                type="button"
+                                id="clearSearchA"
+                                class="text-btn"
+                                onclick="clearSearch('searchA', 'tableA', 'totalA')"
+                                hidden
+                            >
+                                Clear
+                            </button>
+                        </div>
+                        {% if table_a_columns %}
+                        <div class="column-toggle-row" id="columnControlsA">
+                            {% for column in table_a_columns %}
+                            <label class="column-chip">
+                                <input
+                                    type="checkbox"
+                                    {% if column.key in table_a_default_columns %}checked{% endif %}
+                                    onchange="toggleColumn('tableA', '{{ column.key }}', this.checked)"
+                                />
+                                <span>{{ column.label }}</span>
+                            </label>
+                            {% endfor %}
+                        </div>
+                        {% endif %}
+                        <p id="countA" class="table-count">0 items shown</p>
+                        <div class="table-scroll">
+                            <table id="tableA">
+                                <thead>
+                                    <tr>
+                                        <th width="44"></th>
+                                        <th>Description</th>
+                                        {% for column in table_a_columns %}
+                                        <th
+                                            class="dynamic-col {% if column.key not in table_a_default_columns %}dynamic-col-hidden{% endif %}"
+                                            data-col-key="{{ column.key }}"
+                                        >
+                                            {{ column.label }}
+                                        </th>
+                                        {% endfor %}
+                                        <th class="amount-col">Amount</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {% for item in table_a %}
+                                    <tr
+                                        class="primary-row"
+                                        data-price="{{ item.amount }}"
+                                        data-description="{{ item.description }}"
+                                        data-date="{{ item.date }}"
+                                        data-target-table="tableB"
+                                        data-detail-id="detailsA-{{ item.id }}"
+                                        tabindex="0"
+                                    >
+                                        <td width="44">
+                                            <label class="uber-checkbox">
+                                                <input
+                                                    type="checkbox"
+                                                    name="transaction_items"
+                                                    value="A_{{ item.id }}"
+                                                />
+                                                <span class="checkmark"></span>
+                                            </label>
+                                        </td>
+                                        <td
+                                            class="match-cell description-cell"
+                                            onclick="rowMatchFallback(this.parentNode)"
+                                            onkeydown="rowMatchFallbackKey(event, this.parentNode)"
+                                            tabindex="0"
+                                        >
+                                            <div class="txn-primary" title="{{ item.description }}">{{ item.description }}</div>
+                                            {% set meta_lines = transaction_meta_lines(item) %}
+                                            {% if meta_lines %}
+                                            <div class="txn-meta">
+                                                {{ meta_lines | join(" • ") }}
+                                            </div>
+                                            {% endif %}
+                                            <button
+                                                type="button"
+                                                class="row-fields-btn"
+                                                onclick="event.stopPropagation(); toggleTransactionDetails('detailsA-{{ item.id }}')"
+                                            >
+                                                Fields
+                                            </button>
+                                            <div class="hover-detail-card">
+                                                <div class="hover-detail-title">Transaction Details</div>
+                                                <div class="hover-detail-grid">
+                                                    {% for detail in get_transaction_detail_rows(item) %}
+                                                    <div class="hover-detail-pill">
+                                                        <span class="detail-label">{{ detail.label }}</span>
+                                                        <span class="detail-value">{{ detail.value }}</span>
+                                                    </div>
+                                                    {% endfor %}
+                                                </div>
+                                            </div>
+                                        </td>
+                                        {% for column in table_a_columns %}
+                                        <td
+                                            class="dynamic-col match-cell optional-col {% if column.key not in table_a_default_columns %}dynamic-col-hidden{% endif %}"
+                                            data-col-key="{{ column.key }}"
+                                            onclick="rowMatchFallback(this.parentNode)"
+                                            onkeydown="rowMatchFallbackKey(event, this.parentNode)"
+                                            tabindex="0"
+                                        >
+                                            {{ format_field_value(item.get(column.key), column.key) }}
+                                        </td>
+                                        {% endfor %}
+                                        <td
+                                            class="price match-cell amount-cell"
+                                            onclick="rowMatchFallback(this.parentNode)"
+                                            onkeydown="rowMatchFallbackKey(event, this.parentNode)"
+                                            tabindex="0"
+                                        >
+                                            {{ "%.2f"|format(item.amount) }}
+                                        </td>
+                                    </tr>
+                                    <tr
+                                        id="detailsA-{{ item.id }}"
+                                        class="table-detail-row"
+                                        style="display: none"
+                                    >
+                                        <td colspan="{{ 3 + (table_a_columns|length) }}">
+                                            <div class="detail-drawer">
+                                                {% for detail in get_transaction_detail_rows(item) %}
+                                                <div class="detail-pill">
+                                                    <span class="detail-label">{{ detail.label }}</span>
+                                                    <span class="detail-value">{{ detail.value }}</span>
+                                                </div>
+                                                {% endfor %}
+                                            </div>
+                                        </td>
+                                    </tr>
+                                    {% endfor %}
+                                </tbody>
+                            </table>
+                        </div>
+                        <p id="emptyA" class="empty-copy table-empty" hidden>
+                            No ledger transactions match that search.
+                        </p>
+                    </div>
+
+                    <div class="uber-card" id="dropZoneB">
+                        <div class="card-header card-header-top">
+                            <div>
+                                <p class="eyebrow">BANK</p>
+                                <h3>Bank Statement</h3>
+                            </div>
+                            <div class="header-actions">
+                                <button
+                                    type="button"
+                                    class="sort-btn"
+                                    onclick="sortTable('tableB', 'text')"
+                                >
+                                    A-Z
+                                </button>
+                                <button
+                                    type="button"
+                                    class="sort-btn"
+                                    onclick="sortTable('tableB', 'amount')"
+                                >
+                                    $
+                                </button>
+                                <button
+                                    type="button"
+                                    class="uber-btn-outline compact-outline"
+                                    onclick="openImportWizard('B')"
+                                >
+                                    Import
+                                </button>
+                                <a
+                                    href="/export_transactions/B"
+                                    class="uber-btn-outline compact-outline"
+                                >
+                                    Export
+                                </a>
+                                <span id="totalB" class="badge">0.00</span>
+                            </div>
+                        </div>
+                        <input
+                            type="text"
+                            id="searchB"
+                            class="uber-search"
+                            onkeyup="filterTable('searchB', 'tableB', 'totalB')"
+                            placeholder="Search bank description, ref, note..."
+                            autocomplete="off"
+                            aria-label="Search bank transactions"
+                        />
+                        <div class="table-toolbar">
+                            <p class="table-helper">
+                                Click a row to compare matches. Use the checkbox
+                                to send it to the queue.
+                            </p>
+                            <button
+                                type="button"
+                                id="clearSearchB"
+                                class="text-btn"
+                                onclick="clearSearch('searchB', 'tableB', 'totalB')"
+                                hidden
+                            >
+                                Clear
+                            </button>
+                        </div>
+                        {% if table_b_columns %}
+                        <div class="column-toggle-row" id="columnControlsB">
+                            {% for column in table_b_columns %}
+                            <label class="column-chip">
+                                <input
+                                    type="checkbox"
+                                    {% if column.key in table_b_default_columns %}checked{% endif %}
+                                    onchange="toggleColumn('tableB', '{{ column.key }}', this.checked)"
+                                />
+                                <span>{{ column.label }}</span>
+                            </label>
+                            {% endfor %}
+                        </div>
+                        {% endif %}
+                        <p id="countB" class="table-count">0 items shown</p>
+                        <div class="table-scroll">
+                            <table id="tableB">
+                                <thead>
+                                    <tr>
+                                        <th width="44"></th>
+                                        <th>Description</th>
+                                        {% for column in table_b_columns %}
+                                        <th
+                                            class="dynamic-col {% if column.key not in table_b_default_columns %}dynamic-col-hidden{% endif %}"
+                                            data-col-key="{{ column.key }}"
+                                        >
+                                            {{ column.label }}
+                                        </th>
+                                        {% endfor %}
+                                        <th class="amount-col">Amount</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {% for item in table_b %}
+                                    <tr
+                                        class="primary-row"
+                                        data-price="{{ item.amount }}"
+                                        data-description="{{ item.description }}"
+                                        data-date="{{ item.date }}"
+                                        data-target-table="tableA"
+                                        data-detail-id="detailsB-{{ item.id }}"
+                                        tabindex="0"
+                                    >
+                                        <td width="44">
+                                            <label class="uber-checkbox">
+                                                <input
+                                                    type="checkbox"
+                                                    name="transaction_items"
+                                                    value="B_{{ item.id }}"
+                                                />
+                                                <span class="checkmark"></span>
+                                            </label>
+                                        </td>
+                                        <td
+                                            class="match-cell description-cell"
+                                            onclick="rowMatchFallback(this.parentNode)"
+                                            onkeydown="rowMatchFallbackKey(event, this.parentNode)"
+                                            tabindex="0"
+                                        >
+                                            <div class="txn-primary" title="{{ item.description }}">{{ item.description }}</div>
+                                            {% set meta_lines = transaction_meta_lines(item) %}
+                                            {% if meta_lines %}
+                                            <div class="txn-meta">
+                                                {{ meta_lines | join(" • ") }}
+                                            </div>
+                                            {% endif %}
+                                            <button
+                                                type="button"
+                                                class="row-fields-btn"
+                                                onclick="event.stopPropagation(); toggleTransactionDetails('detailsB-{{ item.id }}')"
+                                            >
+                                                Fields
+                                            </button>
+                                            <div class="hover-detail-card">
+                                                <div class="hover-detail-title">Transaction Details</div>
+                                                <div class="hover-detail-grid">
+                                                    {% for detail in get_transaction_detail_rows(item) %}
+                                                    <div class="hover-detail-pill">
+                                                        <span class="detail-label">{{ detail.label }}</span>
+                                                        <span class="detail-value">{{ detail.value }}</span>
+                                                    </div>
+                                                    {% endfor %}
+                                                </div>
+                                            </div>
+                                        </td>
+                                        {% for column in table_b_columns %}
+                                        <td
+                                            class="dynamic-col match-cell optional-col {% if column.key not in table_b_default_columns %}dynamic-col-hidden{% endif %}"
+                                            data-col-key="{{ column.key }}"
+                                            onclick="rowMatchFallback(this.parentNode)"
+                                            onkeydown="rowMatchFallbackKey(event, this.parentNode)"
+                                            tabindex="0"
+                                        >
+                                            {{ format_field_value(item.get(column.key), column.key) }}
+                                        </td>
+                                        {% endfor %}
+                                        <td
+                                            class="price match-cell amount-cell"
+                                            onclick="rowMatchFallback(this.parentNode)"
+                                            onkeydown="rowMatchFallbackKey(event, this.parentNode)"
+                                            tabindex="0"
+                                        >
+                                            {{ "%.2f"|format(item.amount) }}
+                                        </td>
+                                    </tr>
+                                    <tr
+                                        id="detailsB-{{ item.id }}"
+                                        class="table-detail-row"
+                                        style="display: none"
+                                    >
+                                        <td colspan="{{ 3 + (table_b_columns|length) }}">
+                                            <div class="detail-drawer">
+                                                {% for detail in get_transaction_detail_rows(item) %}
+                                                <div class="detail-pill">
+                                                    <span class="detail-label">{{ detail.label }}</span>
+                                                    <span class="detail-value">{{ detail.value }}</span>
+                                                </div>
+                                                {% endfor %}
+                                            </div>
+                                        </td>
+                                    </tr>
+                                    {% endfor %}
+                                </tbody>
+                            </table>
+                        </div>
+                        <p id="emptyB" class="empty-copy table-empty" hidden>
+                            No bank transactions match that search.
+                        </p>
+                    </div>
+                </div>
+                <button type="submit" class="uber-btn-black-action">
+                    Add Selected To Queue
+                </button>
+            </form>
+
+            <div class="queue-section">
+                <div class="section-header">
+                    <h2>Queue</h2>
+                    <span id="queueDiffWrapper">
+                        Diff:
+                        <strong id="qDiffVal">{{ queue_total }}</strong>
+                    </span>
+                </div>
+
+                {% if queue %}
+                <div class="uber-card drilldown-card">
+                    <div class="drilldown-grid">
+                        <div>
+                            <small>GL TOTAL</small><br />
+                            <span id="drill_gl">0.00</span>
+                        </div>
+                        <div>
+                            <small>BANK TOTAL</small><br />
+                            <span id="drill_bank">0.00</span>
+                        </div>
+                        <div class="variance-box">
+                            <small>VARIANCE</small><br />
+                            <span id="drill_var">0.00</span>
+                        </div>
+                    </div>
+                </div>
+
+                <ul class="uber-list" id="queueList">
+                    {% for q in queue %}
+                    <li data-source="{{ q.source_type }}" data-amount="{{ q.amount }}">
+                        <div class="queue-copy">
+                            <span class="queue-title">
+                                <small>[{{ q.source_type }}]</small>
+                                {{ q.description }}
+                            </span>
+                            {% set queue_meta = transaction_meta_lines(q) %}
+                            {% if queue_meta %}
+                            <div class="txn-meta">{{ queue_meta | join(" • ") }}</div>
+                            {% endif %}
+                        </div>
+                        <div class="queue-actions">
+                            <span>{{ "%.2f"|format(q.amount) }}</span>
+                            <form
+                                action="/remove_from_queue/{{ q.source_type }}/{{ q.id }}"
+                                method="post"
+                            >
+                                <button type="submit" class="text-btn danger-text">
+                                    Remove
+                                </button>
+                            </form>
+                        </div>
+                    </li>
+                    {% endfor %}
+                </ul>
+                <form action="/clear_queue" method="post">
+                    <button
+                        type="button"
+                        class="uber-btn-black-action"
+                        onclick="validateAndProcess()"
+                    >
+                        Process Reco
+                    </button>
+                </form>
+                {% else %}
+                <p class="empty-copy">Queue is empty</p>
+                {% endif %}
+            </div>
+
+            <div class="processed-section">
+                <div class="section-header history-header">
+                    <h2>History</h2>
+                    <div class="header-actions">
+                        <a href="/download_report_xlsx" class="uber-btn-outline compact-outline">
+                            Export XLSX
+                        </a>
+                        <a href="/download_report" class="uber-btn-outline compact-outline">
+                            Export TXT
+                        </a>
+                    </div>
+                </div>
+                <div class="uber-tabs">
+                    <input
+                        id="historySearch"
+                        type="text"
+                        class="search-input history-search-input"
+                        placeholder="Search history by reco, description, ref, date..."
+                        oninput="filterProcessedHistory()"
+                    />
+                    <button class="tab-link active" onclick="switchTab(this, 'all')">
+                        All
+                    </button>
+                    <button class="tab-link" onclick="switchTab(this, 'nonzero')">
+                        Non-zero
+                    </button>
+                    <button class="tab-link" onclick="switchTab(this, 'zero')">
+                        Zero
+                    </button>
+                </div>
+                <div class="uber-card no-padding">
+                    <table class="final-table">
+                        <tbody id="processedBody">
+                            {% for p in processed %}
+                            <tr
+                                onclick="toggleRow('{{ p.group_id }}')"
+                                class="processed-row"
+                                data-sum="{{ p.group_sum }}"
+                                data-group-id="{{ p.group_id }}"
+                                tabindex="0"
+                                onkeydown="handleProcessedRowKeydown(event, '{{ p.group_id }}')"
+                            >
+                                <td width="30">→</td>
+                                <td>
+                                    <strong>Reco {{ p.group_id }}</strong><br />
+                                    <small class="processed-time">{{ p.timestamp }}</small>
+                                </td>
+                                <td align="right">
+                                    <small>Diff: {{ p.group_sum }}</small>
+                                    <span
+                                        class="status-dot {% if p.group_sum|float == 0 %}dot-green{% else %}dot-white{% endif %}"
+                                    ></span>
+                                </td>
+                            </tr>
+                            <tr
+                                id="details-{{ p.group_id }}"
+                                class="details-row"
+                                style="display: none"
+                            >
+                                <td colspan="3">
+                                    <div class="mobile-details-flex">
+                                        <div class="detail-column">
+                                            <strong>GL Side</strong>
+                                            {% for i in p.items_a %}
+                                            <div class="history-item">
+                                                <div class="history-topline">
+                                                    <div class="txn-primary">{{ i.description }}</div>
+                                                    <div class="history-amount">{{ "%.2f"|format(i.amount) }}</div>
+                                                </div>
+                                                <div class="detail-drawer history-detail-drawer">
+                                                    {% for detail in get_transaction_detail_rows(i) %}
+                                                    <div class="detail-pill history-pill">
+                                                        <span class="detail-label">{{ detail.label }}</span>
+                                                        <span class="detail-value">{{ detail.value }}</span>
+                                                    </div>
+                                                    {% endfor %}
+                                                </div>
+                                            </div>
+                                            {% endfor %}
+                                        </div>
+                                        <div class="detail-column">
+                                            <strong>Bank Side</strong>
+                                            {% for i in p.items_b %}
+                                            <div class="history-item">
+                                                <div class="history-topline">
+                                                    <div class="txn-primary">{{ i.description }}</div>
+                                                    <div class="history-amount">{{ "%.2f"|format(i.amount) }}</div>
+                                                </div>
+                                                <div class="detail-drawer history-detail-drawer">
+                                                    {% for detail in get_transaction_detail_rows(i) %}
+                                                    <div class="detail-pill history-pill">
+                                                        <span class="detail-label">{{ detail.label }}</span>
+                                                        <span class="detail-value">{{ detail.value }}</span>
+                                                    </div>
+                                                    {% endfor %}
+                                                </div>
+                                            </div>
+                                            {% endfor %}
+                                        </div>
+                                    </div>
+                                </td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                    <div class="grand-total-footer">
+                        <span>Variance</span>
+                        <span id="processedGrandTotal">0.00</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <script>
+            window.reconApp = {
+                presets: {{ presets | tojson }},
+                canonicalFields: {{ canonical_fields | tojson }},
+                processed: {{ processed | tojson }}
+            };
+        </script>
+        <script src="{{ url_for('static', filename='app.js') }}"></script>
+        <script>
+            (function () {
+                function safeParseFloat(value) {
+                    var parsed = parseFloat(value);
+                    return isNaN(parsed) ? 0 : parsed;
+                }
+
+                function clearRows() {
+                    var rows = document.querySelectorAll("#tableA tbody tr, #tableB tbody tr");
+                    rows.forEach(function (row) {
+                        row.style.opacity = "1";
+                        row.querySelectorAll("td").forEach(function (cell) {
+                            cell.style.background = "";
+                            cell.style.boxShadow = "";
+                            cell.style.borderTop = "";
+                            cell.style.borderBottom = "";
+                            cell.style.color = "";
+                        });
+                    });
+                }
+
+                function paintRowBlock(row, kind) {
+                    var styles = {
+                        selected: {
+                            background: "rgba(255,255,255,0.08)",
+                            boxShadow: "none",
+                            border: "1px solid rgba(255,255,255,0.08)",
+                            color: "#ffffff"
+                        },
+                        exact: {
+                            background: "rgba(5,163,87,0.18)",
+                            boxShadow: "none",
+                            border: "1px solid rgba(5,163,87,0.12)",
+                            color: "#ffffff"
+                        },
+                        near: {
+                            background: "rgba(255,255,255,0.10)",
+                            boxShadow: "none",
+                            border: "1px solid rgba(255,255,255,0.08)",
+                            color: "#ffffff"
+                        },
+                        warning: {
+                            background: "rgba(255,182,72,0.14)",
+                            boxShadow: "none",
+                            border: "1px solid rgba(255,182,72,0.10)",
+                            color: "#ffffff"
+                        }
+                    };
+
+                    var style = styles[kind];
+                    if (!style) return;
+
+                    row.querySelectorAll("td").forEach(function (cell) {
+                        cell.style.background = style.background;
+                        cell.style.boxShadow = style.boxShadow;
+                        cell.style.borderTop = style.border;
+                        cell.style.borderBottom = style.border;
+                        cell.style.color = style.color;
+                    });
+                }
+
+                window.rowMatchFallback = function (row) {
+                    var targetTableId = row.getAttribute("data-target-table");
+                    if (!targetTableId) return;
+
+                    clearRows();
+                    paintRowBlock(row, "selected");
+
+                    var sourcePrice = Math.abs(safeParseFloat(row.getAttribute("data-price")));
+                    var targetBody = document.querySelector("#" + targetTableId + " tbody");
+                    if (!targetBody) return;
+                    var targetRows = targetBody.rows;
+                    var best = null;
+
+                    Array.prototype.forEach.call(targetRows, function (targetRow) {
+                        var targetPrice = Math.abs(safeParseFloat(targetRow.getAttribute("data-price")));
+                        var delta = Math.abs(sourcePrice - targetPrice);
+
+                        if (delta === 0) {
+                            paintRowBlock(targetRow, "exact");
+                            if (!best) best = targetRow;
+                        } else if ((sourcePrice && (delta / sourcePrice) <= 0.0235) || delta <= 25) {
+                            if (sourcePrice && (delta / sourcePrice) <= 0.0235) {
+                                paintRowBlock(targetRow, "near");
+                            } else {
+                                paintRowBlock(targetRow, "warning");
+                            }
+                            if (!best) best = targetRow;
+                        } else {
+                            targetRow.style.opacity = "0.28";
+                        }
+                    });
+
+                    if (best && best.scrollIntoView) {
+                        best.scrollIntoView({ behavior: "smooth", block: "center" });
+                    }
+                };
+
+                window.rowMatchFallbackKey = function (event, row) {
+                    event = event || window.event;
+                    if (!event) return;
+                    if (event.key === "Enter" || event.key === " ") {
+                        if (event.preventDefault) event.preventDefault();
+                        window.rowMatchFallback(row);
+                    }
+                };
+
+                function bindRows() {
+                    var rows = document.querySelectorAll("#tableA tbody tr, #tableB tbody tr");
+                    rows.forEach(function (row) {
+                        row.style.cursor = "pointer";
+                    });
+                }
+
+                if (document.readyState === "loading") {
+                    document.addEventListener("DOMContentLoaded", bindRows);
+                } else {
+                    bindRows();
+                }
+            })();
+        </script>
+    </body>
+</html>
