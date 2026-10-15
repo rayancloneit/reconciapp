@@ -36,3 +36,5 @@ The application streamlines transaction matching between internal accounting boo
 
 - ARCHITECTURE.md: System design, division data isolation, and persistence details.
 - IMPORT_GUIDE.md: File structure requirements and column mapping rules.
+
+*Repository packaged and published to GitHub in October 2026 from local April–May 2026 development workspace after stripping private family ledger data*
